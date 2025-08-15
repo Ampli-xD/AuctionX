@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { Auction } from '../models/auctions'
 import { Log } from '../models/logs'
 import schedule from 'node-schedule'
-import { setupAuction } from './services/auctionRoom'
+import { setupAuction } from '../services/auctionRoom'
 
 export const auctionRouter = new Hono()
 

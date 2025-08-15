@@ -5,7 +5,7 @@ import WebSocket, { WebSocketServer } from 'ws'
 const wssMap = new Map<number, WebSocketServer>() // auctionId -> ws server
 
 export function setupAuction(auctionId: number, app: Hono) {
-  app.get(`/auction/${auctionId}/join`, (c) => {
+  app.get(`/auction/join/${auctionId}`, (c) => {
     return c.json({ message: 'Auction joined! Connect to WebSocket to bid.' })
   })
 

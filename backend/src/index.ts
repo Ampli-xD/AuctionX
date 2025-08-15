@@ -3,9 +3,12 @@ import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
 import { WebSocketServer } from 'ws'
 import { sequelize } from './db'
-import { redis } from './redis'
+import { redis } from './services/redis'
+import { cors } from 'hono/cors'
 
 const app = new Hono()
+
+app.use('*', cors({ origin: '*' }))
 
 sequelize.sync({ alter: true })
   .then(() => console.log('✅ Models synced'))
@@ -24,7 +27,8 @@ app.get('/cache', async (c) => {
   return c.json({ value: await redis.get('hello') })
 })
 
-const server = serve({ fetch: app.fetch, port: 3000 })
+const server = serve({ fetch: app.fetch, port: 3000, hostname: '0.0.0.0' })
+
 
 // WebSocket support
 const wss = new WebSocketServer({ server })

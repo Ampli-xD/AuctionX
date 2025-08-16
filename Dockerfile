@@ -7,7 +7,7 @@ WORKDIR /app
 COPY backend/package*.json ./backend/
 COPY frontend/package*.json ./frontend/
 
-# Install dependencies (including dev dependencies for TypeScript compilation)
+# Install dependencies 
 RUN cd backend && npm ci
 RUN cd frontend && npm ci --legacy-peer-deps
 
@@ -15,10 +15,7 @@ RUN cd frontend && npm ci --legacy-peer-deps
 COPY backend ./backend
 COPY frontend ./frontend
 
-# Build backend TypeScript
-RUN cd backend && npm run build
-
-# Build frontend
+# Build frontend only
 RUN cd frontend && \
     NODE_ENV=production npm run build
 
@@ -36,13 +33,9 @@ RUN apk add --no-cache \
 # Install PM2 globally
 RUN npm install -g pm2
 
-# Copy built application and production dependencies only
-COPY --from=builder /app/backend/dist ./backend/dist
-COPY --from=builder /app/backend/package*.json ./backend/
+# Copy built application
+COPY --from=builder /app/backend ./backend
 COPY --from=builder /app/frontend/dist ./frontend/dist
-
-# Install only production dependencies
-RUN cd backend && npm ci --only=production
 
 # Copy nginx configuration
 COPY nginx.conf /etc/nginx/http.d/default.conf
@@ -55,7 +48,7 @@ RUN echo '#!/bin/bash\n\
 set -e\n\
 echo "Starting backend with PM2..."\n\
 cd /app/backend\n\
-pm2 start dist/index.js --name hono-backend --no-daemon &\n\
+pm2 start npm --name hono-backend --no-daemon -- start &\n\
 echo "Backend started, waiting 5 seconds..."\n\
 sleep 5\n\
 echo "Starting nginx..."\n\

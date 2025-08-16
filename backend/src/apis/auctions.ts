@@ -2,17 +2,56 @@ import { Hono } from 'hono'
 import { Op } from 'sequelize'
 import { Auction } from '../models/auctions'
 import { Log } from '../models/logs'
+import { User } from '../models/users'
 import { scheduleAuctionStart } from '../services/auctionRoom'
 import schedule from 'node-schedule'
 import { requireAuth } from '../services/middleware'
+import { supabase } from '../services/supabase'
 
 export const auctionRouter = new Hono()
 auctionRouter.use('*', requireAuth)
 
+// Helper function to store user details from Supabase
+async function storeUserIfFirstTime(token: string) {
+  try {
+    // Check if user already exists
+    const existingUser = await User.findOne({ where: { token } })
+    if (existingUser) return existingUser
+
+    // Get user data from Supabase using the token
+    const { data: { user }, error } = await supabase.auth.getUser(token)
+    
+    if (error || !user) {
+      console.error('Failed to fetch user from Supabase:', error)
+      return null
+    }
+
+    // Create new user record
+    const newUser = await User.create({
+      token: token,
+      username: user.user_metadata?.username || user.email?.split('@')[0] || 'user',
+      email: user.email || ''
+    })
+
+    return newUser
+  } catch (err) {
+    console.error('Error storing user:', err)
+    return null
+  }
+}
 
 // GET all auctions, optionally filter by status and seller
 auctionRouter.get('/', async (c) => {
   try {
+    // Get token from Authorization header
+    const authHeader = c.req.header('Authorization')
+    const token = authHeader?.replace('Bearer ', '') || ''
+    
+    // Store user details if first time login
+    if (token) {
+      await storeUserIfFirstTime(token)
+    }
+
     const { status, seller } = c.req.query() as { status?: string; seller?: string }
 
     const where: any = {}

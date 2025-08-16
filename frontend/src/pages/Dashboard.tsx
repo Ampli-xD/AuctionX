@@ -37,7 +37,7 @@ interface User {
   email: string
 }
 
-const API_BASE_URL = "http://localhost:3000"
+const API_BASE_URL = "https://auctionx.onrender.com"
 
 export default function AuctionXDashboard() {
   const [activeView, setActiveView] = useState<ActiveView>("home")

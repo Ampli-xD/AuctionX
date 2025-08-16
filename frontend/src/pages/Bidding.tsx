@@ -47,7 +47,7 @@ interface User {
   email: string;
 }
 
-const SOCKET_URL = "http://localhost:3000"
+const SOCKET_URL = "https://auctionx.onrender.com"
 const SOCKET_PATH = "/api/auction/ws"
 
 export default function BiddingRoom() {

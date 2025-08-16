@@ -15,7 +15,7 @@ const server = createServer(async (req, res) => {
     // Handle CORS preflight
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
-        'Access-Control-Allow-Origin': ['http://localhost:5173','https://auctionx.onrender.com'],
+        'Access-Control-Allow-Origin': 'http://localhost:5173',
         'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type,Authorization',
         'Access-Control-Allow-Credentials': 'true', // Add this if using credentials

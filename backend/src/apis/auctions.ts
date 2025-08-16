@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { Auction } from '../models/auctions'
 import { Log } from '../models/logs'
 import schedule from 'node-schedule'
-import { setupAuction } from '../services/auctionRoom'
+import { scheduleAuctionStart } from '../services/auctionRoom'
 
 export const auctionRouter = new Hono()
 
@@ -56,10 +56,7 @@ auctionRouter.post('/', async (c) => {
 
     const startTime = new Date(body.startDate)
 
-    schedule.scheduleJob(startTime, () => {
-      console.log('🚀 Auction started! This runs only once.')
-      setupAuction(auction.id, c.app)
-    })
+    scheduleAuctionStart(auction.id, auction.startDate)
 
     await Log.create({
       auctionId: auction.id,

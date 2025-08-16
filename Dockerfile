@@ -1,51 +1,63 @@
-FROM node:20-alpine
+FROM node:18
 
 WORKDIR /app
 
 # Install system dependencies
-RUN apk add --no-cache nginx bash
+RUN apt-get update && apt-get install -y \
+    nginx \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install PM2 globally
 RUN npm install -g pm2
 
-# Copy package files for better layer caching
+# Copy package files first for better caching
 COPY backend/package*.json ./backend/
 COPY frontend/package*.json ./frontend/
 
-# Install dependencies
-RUN cd backend && npm ci --only=production
-RUN cd frontend && npm ci
+# Install backend dependencies
+RUN cd backend && npm install --production
+
+# Install frontend dependencies with verbose logging
+RUN cd frontend && \
+    npm install --verbose --legacy-peer-deps
 
 # Copy source code
 COPY backend ./backend
 COPY frontend ./frontend
 
-# Build frontend
-RUN cd frontend && npm run build
+# Build frontend with detailed logging
+RUN cd frontend && \
+    echo "=== Checking installed packages ===" && \
+    ls -la node_modules/@radix-ui/ | head -20 && \
+    echo "=== Building frontend ===" && \
+    NODE_ENV=production npm run build -- --logLevel info
 
-# Copy and validate nginx config
+# Verify build succeeded
+RUN ls -la frontend/dist/ && \
+    echo "Build files:" && \
+    ls frontend/dist/
+
+# Copy nginx config
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-RUN nginx -t
 
-# Create required directories
-RUN mkdir -p /run/nginx /var/log/nginx
+# Test nginx config
+RUN nginx -t
 
 # Create startup script
 RUN echo '#!/bin/bash\n\
 set -e\n\
 echo "Starting nginx..."\n\
-nginx\n\
-echo "Starting backend with PM2..."\n\
-cd /app\n\
-exec pm2-runtime start backend/server.js --name backend --no-daemon\n\
+service nginx start\n\
+echo "Starting backend..."\n\
+cd /app/backend\n\
+exec pm2-runtime start server.js --name backend --no-daemon\n\
 ' > /app/start.sh && chmod +x /app/start.sh
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:5173/ || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD curl -f http://localhost:5173/health || curl -f http://localhost:5173/ || exit 1
 
-# Expose the port nginx is listening on
 EXPOSE 5173
 
-# Use the startup script
 CMD ["/app/start.sh"]

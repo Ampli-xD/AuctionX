@@ -126,7 +126,7 @@ export default function AuctionXDashboard() {
         const { data: profile } = await supabase
           .from('profiles')
           .select('id, full_name, email')
-          .eq('id', userId)
+          .eq('Id', userId)
           .single();
 
         if (profile) {
@@ -153,7 +153,6 @@ export default function AuctionXDashboard() {
       return null;
     }
   };
-
 
   const fetchAuctions = async () => {
     try {
@@ -324,7 +323,7 @@ export default function AuctionXDashboard() {
       case "live": return "default"
       case "pending": return "secondary"
       case "accepted": return "outline"
-      case "scheduled": return "outline"  // Add this line
+      case "scheduled": return "outline"
       case "ended": return "destructive"
       case "rejected": return "destructive"
       default: return "secondary"
@@ -410,9 +409,17 @@ export default function AuctionXDashboard() {
             </Button>
           </>
         ) : (
-          <Button className="w-full" disabled={auction.status === "ended"}>
+          <Button 
+            className="w-full" 
+            disabled={auction.status !== "live"}
+            onClick={() => {
+              if (auction.status === "live") {
+                window.location.href = `/bid?auctionId=${auction.id}`
+              }
+            }}
+          >
             {auction.status === "live" ? "Place Bid" : 
-             auction.status === "ended" ? "Auction Ended" : "View Details"}
+             auction.status === "ended" ? "Auction Ended" : "Not Started"}
           </Button>
         )}
       </CardFooter>
@@ -420,8 +427,7 @@ export default function AuctionXDashboard() {
   )
 
   const liveAuctions = auctions.filter(a => a.status === "live" || a.status === "scheduled")
-  const myAuctions = auctions.filter(a => a.seller === currentUserId)
-
+  const myAuctions = auctions.filter(a => a.seller_id === currentUserId)
 
   return (
     <div className="min-h-screen bg-background">

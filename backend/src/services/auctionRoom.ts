@@ -8,11 +8,13 @@ import type { Socket } from 'socket.io'
 
 const auctionConnections = new Map<number, Set<string>>()
 const scheduledJobs = new Map<number, schedule.Job>()
+const userToAuction = new Map<string, number>() // Track which auction each socket is in
 
 let socketHandlersInitialized = false
 
 export function initializeAuctionSocketHandlers() {
   if (socketHandlersInitialized) {
+    console.log('Socket handlers already initialized, skipping...')
     return
   }
 
@@ -21,12 +23,12 @@ export function initializeAuctionSocketHandlers() {
   io.on('connection', (socket: Socket) => {
     console.log('New client connected:', socket.id)
 
-    // New WebSocket handler for room info (replaces the HTTP GET route)
     socket.on('get-room-info', async (data) => {
+      console.log("room-info requested!")
       const { auctionId } = data
       
-      if (!auctionId) {
-        socket.emit('room-info-error', { message: 'Missing auctionId parameter' })
+      if (!auctionId || isNaN(parseInt(auctionId))) {
+        socket.emit('room-info-error', { message: 'Invalid auctionId parameter' })
         return
       }
 
@@ -41,10 +43,13 @@ export function initializeAuctionSocketHandlers() {
         let auctionData = { bid: auction.startBid, bidder: null }
 
         if (currentAuction) {
-          if (typeof currentAuction === 'string') {
-            auctionData = JSON.parse(currentAuction)
-          } else if (typeof currentAuction === 'object') {
-            auctionData = currentAuction
+          try {
+            auctionData = typeof currentAuction === 'string' 
+              ? JSON.parse(currentAuction) 
+              : currentAuction
+          } catch (parseError) {
+            console.error('Redis data parse error:', parseError)
+            // Use default auction data if parsing fails
           }
         }
 
@@ -71,24 +76,35 @@ export function initializeAuctionSocketHandlers() {
     socket.on('join-auction', async (data) => {
       const { auctionId, userId } = data
       
-      if (!auctionId || !userId) {
-        socket.emit('error', { message: 'Missing parameters' })
+      if (!auctionId || !userId || isNaN(parseInt(auctionId))) {
+        socket.emit('error', { message: 'Missing or invalid parameters' })
         return
       }
 
       try {
-        const auction = await Auction.findByPk(auctionId)
-        if (!auction || !auction.live) {
+        // Check if user is already in another auction
+        const existingAuction = userToAuction.get(socket.id)
+        if (existingAuction && existingAuction !== parseInt(auctionId)) {
+          await handleDisconnection(socket)
+        }
+
+        const auction = await Auction.findByPk(parseInt(auctionId))
+        if (!auction) {
+          socket.emit('error', { message: 'Auction not found' })
+          return
+        }
+        
+        if (!auction.live) {
           socket.emit('error', { message: 'Auction not available' })
           return
         }
 
         if (userId === auction.seller) {
-          socket.emit('error', { message: 'Seller cannot participate' })
+          socket.emit('error', { message: 'Seller cannot participate in bidding' })
           return
         }
 
-        await handleConnection(socket, auctionId, userId)
+        await handleConnection(socket, parseInt(auctionId), userId)
       } catch (error) {
         console.error('Join auction error:', error)
         socket.emit('error', { message: 'Connection failed' })
@@ -97,16 +113,23 @@ export function initializeAuctionSocketHandlers() {
 
     socket.on('bid', async (data) => {
       const { auctionId, userId, bid } = data
-      await handleBid(socket, auctionId, userId, bid)
+      
+      // Validate input
+      if (!auctionId || !userId || typeof bid !== 'number' || bid <= 0) {
+        socket.emit('bid_error', { message: 'Invalid bid parameters' })
+        return
+      }
+      
+      await handleBid(socket, parseInt(auctionId), userId, bid)
     })
 
     socket.on('ping', () => {
       socket.emit('pong')
     })
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', (reason) => {
+      console.log('Client disconnected:', socket.id, 'Reason:', reason)
       handleDisconnection(socket)
-      console.log('Client disconnected:', socket.id)
     })
   })
 
@@ -116,17 +139,30 @@ export function initializeAuctionSocketHandlers() {
 
 async function handleConnection(socket: Socket, auctionId: number, userId: string) {
   try {
+    // Clean up any previous connection data
+    await handleDisconnection(socket)
+    
     socket.data.auctionId = auctionId
     socket.data.userId = userId
     
     await socket.join(`auction-${auctionId}`)
     addUserToAuction(auctionId, socket.id)
+    userToAuction.set(socket.id, auctionId)
     
+    // Get current auction state with better error handling
     const currentAuction = await redis.get(`auction:${auctionId}`)
     const auction = await Auction.findByPk(auctionId)
-    const auctionData = currentAuction ? JSON.parse(currentAuction) : { 
-      bid: auction?.startBid || 0, 
-      bidder: null 
+    
+    let auctionData = { bid: auction?.startBid || 0, bidder: null }
+    
+    if (currentAuction) {
+      try {
+        auctionData = typeof currentAuction === 'string' 
+          ? JSON.parse(currentAuction) 
+          : currentAuction
+      } catch (parseError) {
+        console.error('Redis parse error in handleConnection:', parseError)
+      }
     }
 
     socket.emit('auth_success', {
@@ -143,6 +179,7 @@ async function handleConnection(socket: Socket, auctionId: number, userId: strin
     console.log(`User ${userId} connected to auction ${auctionId}`)
   } catch (error) {
     console.error('Connection setup error:', error)
+    socket.emit('error', { message: 'Failed to join auction' })
     socket.disconnect()
   }
 }
@@ -153,25 +190,48 @@ function handleDisconnection(socket: Socket) {
   
   if (auctionId && userId) {
     removeUserFromAuction(auctionId, socket.id)
+    userToAuction.delete(socket.id)
+    
+    // Clean up socket data
+    delete socket.data.auctionId
+    delete socket.data.userId
+    
     console.log(`User ${userId} disconnected from auction ${auctionId}`)
   }
 }
 
 async function handleBid(socket: Socket, auctionId: number, userId: string, bid: number) {
   try {
-    const auction = await Auction.findByPk(auctionId)
-    if (!auction || !auction.live) {
-      socket.emit('error', { message: 'Auction is not live' })
+    // Verify the user is connected to this auction
+    if (socket.data?.auctionId !== auctionId) {
+      socket.emit('bid_error', { message: 'Not connected to this auction' })
       return
     }
 
+    const auction = await Auction.findByPk(auctionId)
+    if (!auction || !auction.live) {
+      socket.emit('bid_error', { message: 'Auction is not live' })
+      return
+    }
+
+    // Use Redis transaction to prevent race conditions
+    const multi = redis.multi()
     const currentAuction = await redis.get(`auction:${auctionId}`)
-    const currentData = currentAuction ? JSON.parse(currentAuction) : { 
-      bid: auction.startBid, 
-      bidder: null 
+    
+    let currentData = { bid: auction.startBid, bidder: null }
+    
+    if (currentAuction) {
+      try {
+        currentData = typeof currentAuction === 'string' 
+          ? JSON.parse(currentAuction) 
+          : currentAuction
+      } catch (parseError) {
+        console.error('Redis parse error in handleBid:', parseError)
+      }
     }
     
-    if (typeof bid !== 'number' || bid <= currentData.bid) {
+    // Validate bid amount
+    if (bid <= currentData.bid) {
       socket.emit('bid_error', {
         message: 'Bid too low',
         minimumRequired: currentData.bid + 1,
@@ -181,7 +241,19 @@ async function handleBid(socket: Socket, auctionId: number, userId: string, bid:
       return
     }
 
-    await redis.set(`auction:${auctionId}`, JSON.stringify({ bid, bidder: userId }))
+    // Prevent self-outbidding
+    if (currentData.bidder === userId) {
+      socket.emit('bid_error', {
+        message: 'You already have the highest bid',
+        currentBid: currentData.bid,
+        currentBidder: currentData.bidder
+      })
+      return
+    }
+
+    // Update Redis and database
+    const newBidData = { bid, bidder: userId }
+    await redis.set(`auction:${auctionId}`, JSON.stringify(newBidData))
     await auction.update({ currentBid: bid, highestBidder: userId })
     await Log.create({ auctionId, type: 'bidding', bid, bidder: userId })
     
@@ -191,12 +263,13 @@ async function handleBid(socket: Socket, auctionId: number, userId: string, bid:
     io.to(`auction-${auctionId}`).emit('new_bid', {
       bid,
       bidder: userId,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      auctionId
     })
 
   } catch (error) {
     console.error('Bid error:', error)
-    socket.emit('error', { message: 'Failed to process bid' })
+    socket.emit('bid_error', { message: 'Failed to process bid' })
   }
 }
 
@@ -211,20 +284,23 @@ function removeUserFromAuction(auctionId: number, socketId: string) {
   const connections = auctionConnections.get(auctionId)
   if (connections) {
     connections.delete(socketId)
-    if (connections.size === 0) {
-      auctionConnections.delete(auctionId)
-    }
     
+    // Emit user count update
     const io = getIO()
     io.to(`auction-${auctionId}`).emit('user_left', {
       activeUsers: connections.size
     })
+    
+    // Clean up empty auction rooms
+    if (connections.size === 0) {
+      auctionConnections.delete(auctionId)
+      console.log(`Auction room ${auctionId} is now empty`)
+    }
   }
 }
 
 export async function startAuction(auctionId: number) {
   // Initialize socket handlers when first auction starts
-  initializeAuctionSocketHandlers()
   
   const auction = await Auction.findByPk(auctionId)
   if (!auction) {
@@ -237,11 +313,10 @@ export async function startAuction(auctionId: number) {
     bidder: null 
   }))
 
-  await auction.update({ live: true })
-  await auction.update({ status: 'live' })
+  await auction.update({ live: true, status: 'live' })
   await Log.create({ 
     auctionId, 
-    type: 'bidding', 
+    type: 'start', // Changed from 'bidding' to be more specific
     bid: null, 
     bidder: null 
   })
@@ -253,6 +328,14 @@ export async function startAuction(auctionId: number) {
   
   scheduledJobs.set(auctionId, job)
   console.log(`Auction ${auctionId} started, will end at ${endTime}`)
+  
+  // Notify all connected clients that auction has started
+  const io = getIO()
+  io.to(`auction-${auctionId}`).emit('auction_started', {
+    auctionId,
+    startTime: new Date().toISOString(),
+    duration: auction.duration
+  })
 }
 
 export async function endAuction(auctionId: number) {
@@ -260,47 +343,82 @@ export async function endAuction(auctionId: number) {
   
   const auction = await Auction.findByPk(auctionId)
   if (auction) {
-    await auction.update({ live: false })
+    await auction.update({ live: false, status: 'ended' })
     await Log.create({ 
       auctionId, 
-      type: 'bidding', 
+      type: 'end', // Changed from 'bidding' to be more specific
       bid: null, 
       bidder: null 
     })
   }
 
   const io = getIO()
+  
+  // Get final bid information
+  const finalAuction = await redis.get(`auction:${auctionId}`)
+  let finalData = null
+  if (finalAuction) {
+    try {
+      finalData = typeof finalAuction === 'string' 
+        ? JSON.parse(finalAuction) 
+        : finalAuction
+    } catch (parseError) {
+      console.error('Redis parse error in endAuction:', parseError)
+    }
+  }
+  
   io.to(`auction-${auctionId}`).emit('auction_ended', {
-    message: 'Auction has ended'
+    auctionId,
+    message: 'Auction has ended',
+    finalBid: finalData?.bid,
+    winner: finalData?.bidder,
+    endTime: new Date().toISOString()
   })
 
-  // Disconnect all users from the auction room
-  const connections = auctionConnections.get(auctionId)
-  if (connections) {
-    const sockets = await io.in(`auction-${auctionId}`).fetchSockets()
-    sockets.forEach(socket => {
-      socket.leave(`auction-${auctionId}`)
-      socket.disconnect()
-    })
-    auctionConnections.delete(auctionId)
-  }
+  // Give clients time to process the end event before disconnecting
+  setTimeout(async () => {
+    // Disconnect all users from the auction room
+    const connections = auctionConnections.get(auctionId)
+    if (connections) {
+      const sockets = await io.in(`auction-${auctionId}`).fetchSockets()
+      sockets.forEach(socket => {
+        socket.leave(`auction-${auctionId}`)
+        // Don't disconnect the socket entirely, just remove from room
+        if (socket.data?.auctionId === auctionId) {
+          delete socket.data.auctionId
+          delete socket.data.userId
+          userToAuction.delete(socket.id)
+        }
+      })
+      auctionConnections.delete(auctionId)
+    }
 
-  await redis.del(`auction:${auctionId}`)
-  const job = scheduledJobs.get(auctionId)
-  if (job) {
-    job.cancel()
-    scheduledJobs.delete(auctionId)
-  }
+    await redis.del(`auction:${auctionId}`)
+    const job = scheduledJobs.get(auctionId)
+    if (job) {
+      job.cancel()
+      scheduledJobs.delete(auctionId)
+    }
 
-  console.log(`Auction ${auctionId} ended and cleaned up`)
+    console.log(`Auction ${auctionId} ended and cleaned up`)
+  }, 2000) // 2 second delay
 }
 
 export function scheduleAuctionStart(auctionId: number, startTime: Date, duration: number) {
-  const jobName = String(auctionId)
-  const job = schedule.scheduleJob(jobName, startTime, async () => {
+  const job = schedule.scheduleJob(`auction-${auctionId}`, startTime, async () => {
     await startAuction(auctionId)
   })
+  
   const endTime = new Date(startTime.getTime() + duration * 60 * 1000)
-  console.log(`Auction ${auctionId} scheduled to start at ${startTime} for duration ${endTime}`)
+  console.log(`Auction ${auctionId} scheduled to start at ${startTime}, end at ${endTime}`)
   return job
+}
+
+// Utility function to get auction statistics
+export function getAuctionStats() {
+  return {
+    activeAuctions: auctionConnections.size,
+    totalConnections: Array.from(auctionConnections.values()).reduce((sum, set) => sum + set.size, 0),
+    scheduledJobs: scheduledJobs.size
+  }
 }

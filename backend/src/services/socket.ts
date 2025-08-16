@@ -5,7 +5,7 @@ let io: SocketIOServer
 
 export const initSocket = (server: HTTPServer) => {
   io = new SocketIOServer(server, {
-    path: '/api/prt/auction/ws',
+    path: '/api/auction/ws',
     cors: { origin: '*' },
   })
 

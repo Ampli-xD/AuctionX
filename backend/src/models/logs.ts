@@ -4,7 +4,7 @@ import { sequelize } from '../db'
 export class Log extends Model {
   declare id: number
   declare auctionId: number
-  declare type: 'created' | 'updated' | 'bidding' | 'deleted'
+  declare type: 'created' | 'updated' | 'bidding' | 'deleted' | 'start'
   declare bid?: number | null
   declare bidder?: string | null
   declare createdAt: Date

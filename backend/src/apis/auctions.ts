@@ -2,12 +2,13 @@ import { Hono } from 'hono'
 import { Op } from 'sequelize'
 import { Auction } from '../models/auctions'
 import { Log } from '../models/logs'
-import { scheduleAuctionStart} from '../services/auctionRoom'
+import { scheduleAuctionStart } from '../services/auctionRoom'
 import schedule from 'node-schedule'
 import { requireAuth } from '../services/middleware'
 
 export const auctionRouter = new Hono()
 auctionRouter.use('*', requireAuth)
+
 
 // GET all auctions, optionally filter by status and seller
 auctionRouter.get('/', async (c) => {

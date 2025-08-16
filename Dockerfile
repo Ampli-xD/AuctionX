@@ -43,17 +43,7 @@ COPY nginx.conf /etc/nginx/http.d/default.conf
 # Test nginx configuration
 RUN nginx -t
 
-# Create startup script
-RUN echo '#!/bin/bash\n\
-set -e\n\
-echo "Starting backend with PM2..."\n\
-cd /app/backend\n\
-pm2 start npm --name hono-backend --no-daemon -- start &\n\
-echo "Backend started, waiting 5 seconds..."\n\
-sleep 5\n\
-echo "Starting nginx..."\n\
-exec nginx -g "daemon off;"\n\
-' > /app/start.sh && chmod +x /app/start.sh
+RUN echo '#!/bin/bash\nset -e\necho "Starting backend with PM2..."\ncd /app/backend\npm2 start npm --name hono-backend --no-daemon -- start &\necho "Backend started, waiting 5 seconds..."\nsleep 5\necho "Starting nginx..."\nexec nginx -g "daemon off;"' > /app/start.sh && chmod +x /app/start.sh
 
 # Health check - adjust port as needed
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \

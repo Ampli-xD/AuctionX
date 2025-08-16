@@ -1,11 +1,10 @@
 import { DataTypes, Model } from 'sequelize'
 import { sequelize } from '../db'
-import { Auction } from './auctions'
 
 export class Log extends Model {
   declare id: number
   declare auctionId: number
-  declare type: 'created' | 'updated' | 'bidding'
+  declare type: 'created' | 'updated' | 'bidding' | 'deleted'
   declare bid?: number | null
   declare bidder?: string | null
   declare createdAt: Date
@@ -16,7 +15,7 @@ Log.init({
   auctionId: { 
     type: DataTypes.INTEGER, 
     allowNull: false,
-    references: { model: Auction, key: 'id' }
+    // Removed references to Auction model
   },
   type: { 
     type: DataTypes.ENUM('created', 'updated', 'deleted', 'bidding'), 

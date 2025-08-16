@@ -56,7 +56,7 @@ sequelize.sync({ alter: true })
 
 
 import { auctionRouter } from './apis/auctions'
-app.route('/api/prt/auction', auctionRouter)
+app.route('/api/auction', auctionRouter)
 
 
 

@@ -9,11 +9,6 @@ import type { Socket } from 'socket.io'
 const auctionConnections = new Map<number, Set<string>>()
 const scheduledJobs = new Map<number, schedule.Job>()
 
-// Remove the HTTP route registration function since we're going full WebSocket
-// export function registerAuctionRoutes(app: Hono) {
-//   // HTTP route removed - now handled via WebSocket
-// }
-
 let socketHandlersInitialized = false
 
 export function initializeAuctionSocketHandlers() {
@@ -243,6 +238,7 @@ export async function startAuction(auctionId: number) {
   }))
 
   await auction.update({ live: true })
+  await auction.update({ status: 'live' })
   await Log.create({ 
     auctionId, 
     type: 'bidding', 
@@ -299,11 +295,12 @@ export async function endAuction(auctionId: number) {
   console.log(`Auction ${auctionId} ended and cleaned up`)
 }
 
-export function scheduleAuctionStart(auctionId: number, startTime: Date) {
-  const job = schedule.scheduleJob(startTime, async () => {
+export function scheduleAuctionStart(auctionId: number, startTime: Date, duration: number) {
+  const jobName = String(auctionId)
+  const job = schedule.scheduleJob(jobName, startTime, async () => {
     await startAuction(auctionId)
   })
-  
-  console.log(`Auction ${auctionId} scheduled to start at ${startTime}`)
+  const endTime = new Date(startTime.getTime() + duration * 60 * 1000)
+  console.log(`Auction ${auctionId} scheduled to start at ${startTime} for duration ${endTime}`)
   return job
 }

@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Bell, Home, Plus, List, LogOut, Clock, DollarSign, User, Check, X, Loader2 } from "lucide-react"
+import { Home, Plus, List, LogOut, Clock, DollarSign, User, Check, X, Loader2 } from "lucide-react"
 
 import { supabase } from "@/lib/supabaseClient"
 
@@ -37,11 +37,10 @@ interface User {
   email: string
 }
 
-const API_BASE_URL = import.meta.PUBLIC_API_URL || "http://localhost:3000"
+const API_BASE_URL = "http://localhost:3000"
 
 export default function AuctionXDashboard() {
   const [activeView, setActiveView] = useState<ActiveView>("home")
-  const [notificationCount] = useState(3)
   const [auctions, setAuctions] = useState<Auction[]>([])
   const [loading, setLoading] = useState(false)
   const [auctionsLoading, setAuctionsLoading] = useState(true)
@@ -116,38 +115,83 @@ export default function AuctionXDashboard() {
       return null;
     }
 
+    // Check cache first
     if (userCache.has(userId)) {
       return userCache.get(userId) || null;
     }
 
     try {
-      const { data, error } = await supabase.auth.admin.getUserById(userId);
-      if (error || !data.user) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('id, full_name, email')
-          .eq('Id', userId)
-          .single();
+      const token = await getToken();
+      if (!token) return null;
 
-        if (profile) {
-          const user: User = {
-            id: profile.id,
-            full_name: profile.full_name,
-            email: profile.email
-          };
-          setUserCache(prev => new Map(prev).set(userId, user));
-          return user;
-        }
+      // Try GET request first (most common pattern)
+      let response = await fetch(`${API_BASE_URL}/api/user/${userId}`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      // If GET doesn't work, try POST with userId in body
+      if (!response.ok && response.status === 404) {
+        response = await fetch(`${API_BASE_URL}/api/user`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ userId: userId }),
+        });
+      }
+
+      // If POST with userId doesn't work, try the original format
+      if (!response.ok) {
+        response = await fetch(`${API_BASE_URL}/api/user/`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ token: userId }),
+        });
+      }
+
+      if (!response.ok) {
+        console.error(`Failed to fetch user: ${response.status} ${response.statusText}`);
         return null;
       }
 
-      const user: User = {
-        id: data.user.id,
-        full_name: data.user.user_metadata?.full_name || "",
-        email: data.user.email || ""
-      };
+      const userData = await response.json();
+
+      // Handle both single user object and array responses
+      let user: User;
+      
+      if (Array.isArray(userData)) {
+        // If API returns array, find the user with matching ID
+        const foundUser = userData.find(u => u.id === userId);
+        if (!foundUser) {
+          console.error("No user found with ID:", userId);
+          return null;
+        }
+        user = {
+          id: foundUser.id,
+          full_name: foundUser.full_name || foundUser.username || foundUser.name || foundUser.email || "Unknown",
+          email: foundUser.email || "",
+        };
+      } else {
+        // If API returns single user object
+        user = {
+          id: userData.id,
+          full_name: userData.full_name || userData.username || userData.name || userData.email || "Unknown",
+          email: userData.email || "",
+        };
+      }
+
+      // Update cache
       setUserCache(prev => new Map(prev).set(userId, user));
       return user;
+      
     } catch (error) {
       console.error("Failed to fetch user:", error);
       return null;
@@ -168,12 +212,21 @@ export default function AuctionXDashboard() {
       
       const data: Auction[] = await response.json()
       
+      // Fetch seller names for all auctions
       const auctionsWithNames = await Promise.all(
         data.map(async (auction) => {
-          const seller = await fetchUserById(auction.seller_id)
-          return {
-            ...auction,
-            sellerName: seller?.full_name || seller?.email || "Unknown Seller"
+          try {
+            const seller = await fetchUserById(auction.seller_id)
+            return {
+              ...auction,
+              sellerName: seller?.full_name || "Unknown Seller"
+            }
+          } catch (error) {
+            console.error(`Failed to fetch seller for auction ${auction.id}:`, error)
+            return {
+              ...auction,
+              sellerName: "Unknown Seller"
+            }
           }
         })
       )
@@ -250,7 +303,7 @@ export default function AuctionXDashboard() {
         startBid: Number(newAuction.startBid),
         bidIncrement: Number(newAuction.bidIncrement),
         startDate: newAuction.dateTime,
-        duration: parseInt(newAuction.duration.split(' ')[0]*60),
+        duration: parseInt(newAuction.duration.split(' ')[0]) * 60,
         live: false,
         currentBid: 0,
         seller: currentUserId,
@@ -345,7 +398,7 @@ export default function AuctionXDashboard() {
         <div className="flex items-center gap-2 mt-2">
           <User className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm text-muted-foreground">
-            Verified Seller
+            Seller: {auction.sellerName || "Loading..."}
           </span>
         </div>
       </CardHeader>
@@ -502,7 +555,7 @@ export default function AuctionXDashboard() {
                 <CardDescription>Fill in the details for your auction</CardDescription>
               </CardHeader>
               <CardContent>
-                <div onSubmit={handleCreateAuction} className="space-y-4">
+                <form onSubmit={handleCreateAuction} className="space-y-4">
                   <div className="space-y-2">
                     <Label htmlFor="item">Item Title *</Label>
                     <Input 
@@ -583,7 +636,6 @@ export default function AuctionXDashboard() {
                     type="submit" 
                     className="w-full" 
                     disabled={loading}
-                    onClick={handleCreateAuction}
                   >
                     {loading ? (
                       <>
@@ -594,7 +646,7 @@ export default function AuctionXDashboard() {
                       "Create Auction"
                     )}
                   </Button>
-                </div>
+                </form>
               </CardContent>
             </Card>
           </div>

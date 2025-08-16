@@ -86,7 +86,7 @@ export default function LoginPage() {
     
     try {
       if (mode === 'login') {
-        const { data, error } = await supabase.auth.signInWithPassword({ 
+        const { error } = await supabase.auth.signInWithPassword({ 
           email: email.trim(), 
           password 
         })

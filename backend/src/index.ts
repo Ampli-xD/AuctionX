@@ -66,6 +66,9 @@ sequelize.sync({ alter: true })
 import { auctionRouter } from './apis/auctions'
 app.route('/api/auction', auctionRouter)
 
+import { userRouter } from './apis/users'
+app.route('/api/user', userRouter)
+
 app.get('/', (c) => c.text('Hono backend running'))
 
 server.listen(3000, '0.0.0.0', () => {

@@ -1,7 +1,11 @@
-FROM node:20
+FROM node:20-alpine
 
 WORKDIR /app
 
+# Install dependencies: nginx + bash (for shell scripts, optional)
+RUN apk add --no-cache nginx bash
+
+# Install pm2
 RUN npm install -g pm2
 
 COPY backend/package*.json ./backend/
@@ -15,7 +19,14 @@ COPY frontend ./frontend
 
 RUN cd frontend && npm run build
 
-EXPOSE 3000 5173
+# Copy nginx config
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-CMD ["pm2-runtime", "start", "backend/server.js", "--name", "backend", "--watch", "--interpreter", "node", "--", "frontend/server.js", "--name", "frontend", "--watch"]
+# Create nginx runtime dirs
+RUN mkdir -p /run/nginx
 
+EXPOSE 5173
+
+# Start nginx + backend with pm2
+CMD nginx && \
+    pm2-runtime start backend/server.js --name backend --watch

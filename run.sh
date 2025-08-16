@@ -3,10 +3,9 @@
 set -e
 
 # Build the image
-echo "🔨 Building auctionx-backend image..."
+echo "🔨 Building auctionx image..."
 podman build -t auctionx .
 
 # Run the container
-echo "🏃 Running auctionx-backend container..."
-podman run -it --rm -p 3000:3000 -p 5173:5173 auctionx
-
+echo "🏃 Running auctionx container..."
+podman run -it --rm -p 5173:5173 auctionx

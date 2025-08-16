@@ -31,4 +31,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 
 EXPOSE 80
 
-CMD ["sh", "-c", "cd /app/backend && pm2 start npm --name hono-backend & sleep 5 && nginx -g 'daemon off;'"]
+CMD ["sh", "-c", "cd /app/backend && pm2 start npm --name hono-backend -- run dev & sleep 5 && nginx -g 'daemon off;'"]
